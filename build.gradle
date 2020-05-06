@@ -1,0 +1,120 @@
+plugins {
+    id 'java-library'
+    id 'eclipse'
+    id 'jacoco'
+    id 'com.github.spotbugs' version '2.0.1'
+    id 'ru.vyarus.java-lib' version '2.1.0'
+    id 'com.jfrog.bintray' version '1.8.1'
+}
+
+group = 'de.mynttt'
+version = '1.0.0'
+description = 'A simple hierarchical scoped group based key:value storage/configuration format.'
+
+System.out.println "\nVersion: " + version
+
+sourceCompatibility = 11
+
+repositories {
+    jcenter()
+}
+
+dependencies {
+    provided group: 'com.github.spotbugs', name: 'spotbugs-annotations', version: '3.1.12'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.5.2'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.5.2'
+}
+
+test {
+    useJUnitPlatform() {
+        testLogging.showStandardStreams = true
+    }
+}
+
+ext {
+    currentVersion = version
+}
+
+pom {
+    name 'ezconf'
+    description 'A simple hierarchical scoped group based key:value storage/configuration format.'
+    licenses {
+        license {
+            name "The MIT License"
+            url "http://www.opensource.org/licenses/MIT"
+            distribution 'repo'
+        }
+    }
+    scm {
+        url 'https://github.com/mynttt/ezconf.git'
+        connection 'scm:git@github.com:mynttt/ezconf.git'
+        developerConnection 'scm:git@github.com:mynttt/ezconf.git'
+    }
+    developers {
+        developer {
+            id "mynttt"
+            name "Marc Herschel"
+            email "marc (at) herschel (dot) io"
+        }
+    }
+}
+
+bintray {
+    publications = ['maven']
+    user = System.getProperty('bintray.user')
+    key = System.getProperty('bintray.key')
+    
+    pkg {
+        repo = 'oss'
+        name = 'de.mynttt.ezconf'
+        userOrg = 'mynttt'
+        licenses = ['MIT']
+        vcsUrl = 'https://github.com/mynttt/ezconf.git'
+        version {
+            name = "${currentVersion}"
+            desc = "Version: ${currentVersion}"
+            released  = new Date()
+        }
+    }
+}
+
+spotbugs {
+    ignoreFailures = false
+    effort = "max"
+    sourceSets = [sourceSets.main]
+}
+
+tasks.withType(com.github.spotbugs.SpotBugsTask) {
+    reports.xml.enabled = false
+    reports.html.enabled = true
+}
+
+jacoco {
+    toolVersion = "0.8.5"
+    reportsDir = file("$buildDir/customJacocoReportDir")
+}
+
+jacocoTestReport {
+    reports {
+        xml.enabled true
+        csv.enabled false
+        xml.destination file("${buildDir}/jacoco/jacoco.xml")
+        html.destination file("${buildDir}/jacocoHtml")
+    }
+}
+
+javadoc {
+    failOnError = false
+    destinationDir = rootProject.file('javadocs')
+    title = "ezconf API Documentation"
+    options.memberLevel = JavadocMemberLevel.PROTECTED
+}
+
+jar {
+    manifest {
+        attributes("Built-By": "mynttt")
+    }
+}
+
+jar.dependsOn javadocJar, sourcesJar
+build.dependsOn jacocoTestReport, javadoc

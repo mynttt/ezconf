@@ -1,0 +1,15 @@
+#comment
+
+all {
+    key: value;
+}
+
+31 {
+    4: 5;
+}
+
+#test
+22 {
+    #another comment
+    \{: ???;
+}

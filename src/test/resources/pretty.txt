@@ -1,0 +1,26 @@
+level1 {
+    main_here: exists;
+    main: exists;
+
+    level2 {
+        key2: exists;
+    }
+
+    level3 {
+        key3: exists;
+    }
+
+    level4 {
+        key: value;
+
+        level4a {
+            key4a: exists
+                   is
+                   multiline;
+
+            level5a {
+                key: value;
+            }
+        }
+    }
+}

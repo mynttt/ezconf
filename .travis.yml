@@ -1,0 +1,37 @@
+dist: bionic
+language: java
+  
+matrix:
+  include:
+  - env:
+      - ADOPTOPENJDK=11
+ 
+before_install:
+  - chmod +x gradlew
+  # adding $HOME/.sdkman to cache would create an empty directory, which interferes with the initial installation
+  - "[[ -d /home/travis/.sdkman/ ]] && [[ -d /home/travis/.sdkman/bin/ ]] || rm -rf /home/travis/.sdkman/"
+  - curl -sL https://get.sdkman.io | bash
+  - echo sdkman_auto_answer=true > $HOME/.sdkman/etc/config
+  - echo sdkman_auto_selfupdate=true >> $HOME/.sdkman/etc/config
+  - source "/home/travis/.sdkman/bin/sdkman-init.sh"
+ 
+install:
+  - sdk install java $(sdk list java | grep -o "$ADOPTOPENJDK\.[0-9\.]*hs-adpt" | head -1) || true
+  - unset _JAVA_OPTIONS
+  - unset JAVA_HOME
+  - java -Xmx32m -version
+ 
+script: ./gradlew build
+ 
+before_cache:
+  - rm -f  $HOME/.gradle/caches/modules-2/modules-2.lock
+  - rm -fr $HOME/.gradle/caches/*/plugin-resolution/
+
+cache:
+  directories:
+    - $HOME/.gradle/caches/
+    - $HOME/.gradle/wrapper/
+    - $HOME/.sdkman
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)

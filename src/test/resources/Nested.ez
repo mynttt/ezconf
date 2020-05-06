@@ -1,0 +1,35 @@
+#comment
+
+level1 {
+    main: exists;
+
+    level2 {
+        key2: exists;
+    }
+    
+    level3 {
+        key3: exists;
+    }
+    
+    main_here: exists;
+    
+    level4 {
+        
+        # No KV here
+        
+        key: value;
+        
+        level4a {
+          # But here
+          key4a: exists
+          is
+          multiline;
+          
+          level5a {
+            key: value;
+          }
+          
+        }
+        
+    }
+}

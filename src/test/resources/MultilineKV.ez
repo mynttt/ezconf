@@ -1,0 +1,10 @@
+#comment
+
+all {
+    key: value #comment
+    is
+    a\; 
+    multiline
+    value
+    ;
+}

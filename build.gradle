@@ -38,6 +38,7 @@ ext {
 pom {
     name 'ezconf'
     description 'A simple hierarchical scoped group based key:value storage/configuration format.'
+    url 'https://github.com/mynttt/ezconf'
     licenses {
         license {
             name "The MIT License"

@@ -23,6 +23,7 @@ group1 {
       key3: key
             is
             multiline;
+      key4: "has literal \"";
   }
 }
 

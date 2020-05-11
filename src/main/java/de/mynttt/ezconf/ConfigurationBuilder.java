@@ -1,7 +1,6 @@
 package de.mynttt.ezconf;
 
 import java.util.Objects;
-import java.util.Stack;
 import de.mynttt.ezconf.implementation.DefaultConfigurationFactory;
 
 /**
@@ -99,7 +98,7 @@ public final class ConfigurationBuilder {
          */
         public GroupBuilderContext put(String key, String value) {
             Objects.requireNonNull(key, "Key must be non-null.");
-            Objects.requireNonNull(value, "Value must be non-null");
+            Objects.requireNonNull(value, "Value for '" + key + "' must be non-null");
             String k = key.trim(), v = value.trim();
             if(k.isEmpty())
                 throw new IllegalArgumentException("Key is blank for value: '"+v+"'. Blank keys are not permitted.");

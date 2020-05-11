@@ -32,21 +32,34 @@ group2 {
 
 Groups can be nested arbitrarily deep.
 
-## Constraints
+## Syntax and Constraints
 
-- Groups can be nested
-- Only groups can contain key:value pairs
-- Group identifier names must be unique
-- Group identifier names can only contain letters and digits, whitespace is not permitted and will be skipped. (Example: `t est {}` will be parsed as `test`.)
-- Group identifiers cannot be multiline or blank
-- Keys can contain whitespace but will be trimmed (i.e. `  k ey  : value;` will be parsed as `key`)
-- Keys cannot be multiline or blank
-- Keys must be unique in a given scope
-- Values can contain whitespace and can be multiline but cannot be blank
-- Values will be trimmed at each line while parsing (i.e. ` value   \n   stop;` will be parsed as `value\nstop`)
-- Null values do not exist and are invalid
-- Special symbols must be escaped with `\`, to escape the escape do this `\\`
-- Java reference builder implementation automatically escapes strings
+- ### Groups:
+  - Groups can be nested
+  - Only groups can contain key:value pairs
+  - Group identifier names must be unique in the given scope
+  - Group identifier names can only contain letters and digits, whitespace is not permitted and will be skipped. (Example: `t est {}` will be parsed as `test`.)
+  - Group identifiers cannot be multiline or blank
+
+- ### Keys:
+  - Keys can contain whitespace but will be trimmed (i.e. `  k ey  : value;` will be parsed as `k ey`)
+  - Keys cannot be multiline or blank
+  - Keys must be unique in a given scope
+  - Null keys cannot exist and are invalid
+  - Special symbols must be escaped with `\`, to escape the escape do this `\\` (value literal must not be escaped for keys)
+
+- ### Values:
+  - Values can contain whitespace and can be multiline but cannot be blank
+  - Values will be trimmed at each line while parsing (i.e. ` value   \n   stop;` will be parsed as `value\nstop`)
+  - Null values do not exist and are invalid
+  - Special symbols must be escaped with `\`, to escape the escape do this `\\`
+  - Literals allow to not escape special characters (exception: `"`)
+    - Literals must have the first non-whitespace character start with `"`
+    - An unescaped `"` will trigger an exception if the first non-whitespace character is not `"`
+    - Within the literal `"` must still be escaped
+    - A closing literal still requires the `;`
+  
+- Parser automatically escaped key / value pairs on dump
 
 ## Special symbols
 ```
@@ -55,6 +68,7 @@ Groups can be nested arbitrarily deep.
 : -> key value seperator
 ; -> end value
 # -> comment, skip everything after for this line
+" -> value literal
 ```
 
 ## API Example
@@ -95,7 +109,10 @@ public class Example {
                 .endRoot()
                 .build();
         
-        System.out.println(EzConf.dumpPretty(built));
+        System.out.println("Printing with literals used for escaping:");
+        System.out.println(EzConf.defaultParser().dumpPretty(built));
+        System.out.println("Printing without literals used for escaping:");
+        System.out.println(EzConf.defaultParser(ParserFlags.DUMP_ESCAPE_INSTEAD_OF_LITERAL).dumpPretty(built));
         
         ValidationContext ctx = ConfigurationValidator.newInstance()
                 .requireGroups("example", "example.nested")

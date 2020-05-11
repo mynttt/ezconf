@@ -9,10 +9,13 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Stack;
+import java.util.stream.Collectors;
 import de.mynttt.ezconf.implementation.DefaultConfigurationFactory;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
@@ -28,24 +31,28 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
  *  - <code>GROUP_IDENTIFIER</code> cannot be multiline and whitespace will be skipped. (.i.e. T OM {} =&gt; TOM)
  * <p>
  * <code>KEY</code>: <p>
- *  - Can contain whitespace, will be trimmed.
- *  - Can't be multiline. 
- *  - Can't be blank.
- *  - Must be unique for the given scope.
+ *  - Can contain whitespace, will be trimmed.<br>
+ *  - Can't be multiline. <br>
+ *  - Can't be blank.<br>
+ *  - Must be unique for the given scope.<br>
  * <p>
  * <code>VALUE</code>: <p>
- * - Can contain whitespace, can be multiline.
- * - Will be trimmed at every line so '  t  ' will be parsed as 't'.
- * - Can't be blank.
+ * - Can contain whitespace, can be multiline.<br>
+ * - Will be trimmed at every line so '  t  ' will be parsed as 't'.<br>
+ * - Can't be blank.<br>
+ * - Can have literals: i.e <code>value: "this is a literal! this \" must be escaped! I must end with ; after I am closed";</code><br>
+ * - To use a literal the first non-whitespace character must be the literal character<br>
+ * - If literals are not being used they must be escaped as \".<br>
+ * - Literals can also be multiline<br>
  * <p>
- * Special characters: <code>:, ;, {, }, #</code> must be escaped with <code>\</code>.<br>
+ * Special characters: <code>:, ;, {, }, #</code> must be escaped with <code>\</code> when not in a literal.<br>
+ * When using a literal only <code>"</code> must be escaped!.<br>
  * <code>\</code> must also be escaped.<br>
  * <code>#</code> is the comment character.
  * 
  * <p>Null values don't exist.</p>
  * 
  * <pre>
- * 
  * GROUP_IDENTIFIER {
  *     KEY: VALUE;
  *     KEY: VALUE;
@@ -55,6 +62,9 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
  *     
  *     KEY: \{\}\#\:\;\\
  *          escaped chars and multiline value;
+ *     
+ *     KEY: "A literal! \"
+ *           Can also be multiline!";
  *     
  *     GROUP_IDENTIFIER {
  *         ....
@@ -73,15 +83,15 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
  */
 public final class EzConf {
     private static final String INDENT = "    ";
-    private static final EzConf DEFAULT = new EzConf(new DefaultConfigurationFactory());
     private static final char BEGIN_GROUP = '{', 
                         END_GROUP = '}',
                         KV_SEPERATOR = ':',
                         ESCAPE = '\\',
                         COMMENT = '#',
-                        V_END = ';';
+                        V_END = ';',
+                        LITERAL = '"';
     
-    private static final Map<Character, String> SHOULD_ESCAPE = Map.of(
+    private static final Map<Character, String> SHOULD_ESCAPE_KEY = Map.of(
             BEGIN_GROUP, "\\" + BEGIN_GROUP,
             END_GROUP, "\\" + END_GROUP,
             KV_SEPERATOR, "\\" + KV_SEPERATOR,
@@ -90,14 +100,47 @@ public final class EzConf {
             V_END, "\\" + V_END
             );
     
-    private enum State {
-        IN_GROUP, IN_VALUE, UNDEFINED;
+    private static final Map<Character, String> SHOULD_ESCAPE_VALUE = new HashMap<>(SHOULD_ESCAPE_KEY);
+    
+    static {
+        SHOULD_ESCAPE_VALUE.put(LITERAL, "\\" + LITERAL);
     }
     
+    private static final EscapeHandler 
+            ESC_LITERAL = (sb, buf, s) -> sb.append(LITERAL)
+                                            .append(escaped(Map.of('"', "\\\""), s, buf))
+                                            .append(LITERAL),
+            ESC_NO_LITERAL = (sb, buf, s) -> sb.append(escaped(SHOULD_ESCAPE_VALUE, s, buf));
+    
+    private static final EzConf DEFAULT = new EzConf(new DefaultConfigurationFactory());
+    
     private final ConfigurationFactory factory;
+    private final EnumSet<ParserFlags> flags = EnumSet.noneOf(ParserFlags.class);
+    private final EscapeHandler handler;
+    
+    private enum State {
+        IN_GROUP, IN_VALUE, IN_LITERAL, UNDEFINED;
+    }
+    
+    /**
+     * Flags allow to alter the parsing/dumping behavior.
+     * 
+     * @author mynttt
+     *
+     */
+    public enum ParserFlags {
+        
+        /**
+         * Force the dumper to not use literals.<br>
+         */
+        DUMP_ESCAPE_INSTEAD_OF_LITERAL;
+    }
                         
-    private EzConf(ConfigurationFactory factory) {
+    private EzConf(ConfigurationFactory factory, ParserFlags...flags) {
         this.factory = factory;
+        if(flags != null)
+            this.flags.addAll(Arrays.stream(flags).peek(Objects::requireNonNull).collect(Collectors.toSet()));
+        this.handler = this.flags.contains(ParserFlags.DUMP_ESCAPE_INSTEAD_OF_LITERAL) ? ESC_NO_LITERAL : ESC_LITERAL;
     }
     
     /**
@@ -109,13 +152,23 @@ public final class EzConf {
     }
     
     /**
+     * Default parser with specified flags.
+     * @param flags flags to set with the parser.
+     * @return a parser with the specific flags set.
+     */
+    public static EzConf defaultParser(ParserFlags... flags) {
+        return new EzConf(DEFAULT.factory, flags);
+    }
+    
+    /**
      * Create a parser with own implementation.
      * @param factory to create {@link Configuration} and {@link ConfigurationGroup}
+     * @param flags to set with the parser.
      * @return parser with custom factory.
      */
-    public static EzConf parser(ConfigurationFactory factory) {
+    public static EzConf parser(ConfigurationFactory factory, ParserFlags... flags) {
         Objects.requireNonNull(factory, "factory must not be null");
-        return new EzConf(factory);
+        return new EzConf(factory, flags);
     }
     
     /**
@@ -195,14 +248,16 @@ public final class EzConf {
         String currentKey = null;
 
         int line = 0;
+        int newLineLiteralCounter = -1;
         
         try(BufferedReader r = new BufferedReader(in)) {
             while((lineBuffer = r.readLine()) != null) {
                 lineBuffer = lineBuffer.trim();
                 
                 // Carry over newlines in certain states
-                if(state == State.IN_VALUE || state == State.UNDEFINED) {
+                if(state == State.IN_VALUE || state == State.UNDEFINED || state == State.IN_LITERAL) {
                     buffer.append('\n');
+                    newLineLiteralCounter++;
                 }
                 
                 for(int i = 0; i < lineBuffer.length(); i++) {
@@ -210,16 +265,14 @@ public final class EzConf {
                     buffer.append(c);
                     
                     // Break on comment
-                    if(c == COMMENT) {
-                        if(buffer.length() > 0) {
-                            buffer.deleteCharAt(buffer.length()-1);
-                        //Backtrack on whitespace
-                            String tmp = buffer.toString();
-                            for(int j = tmp.length()-1; j>=0;  j--) {
-                                if(!Character.isWhitespace(tmp.charAt(j)))
-                                    break;
-                                buffer.deleteCharAt(j);
-                            }
+                    if(c == COMMENT && state != State.IN_LITERAL) {
+                        buffer.deleteCharAt(buffer.length()-1);
+                    //Backtrack on whitespace
+                        String tmp = buffer.toString();
+                        for(int j = tmp.length()-1; j>=0;  j--) {
+                            if(!Character.isWhitespace(tmp.charAt(j)))
+                                break;
+                            buffer.deleteCharAt(j);
                         }
                         break;
                     }
@@ -231,8 +284,7 @@ public final class EzConf {
                         switch(c) {
                             case ESCAPE:
                                 buffer.deleteCharAt(buffer.length()-1);
-                                i++;
-                                buffer.append(lineBuffer.charAt(i));
+                                buffer.append(lineBuffer.charAt(++i));
                                 _break = true;
                                 break;
                         
@@ -284,24 +336,55 @@ public final class EzConf {
                         break;
                     case IN_VALUE:
                         
-                        // Handle escapes
-                        if(c == ESCAPE) {
-                            buffer.deleteCharAt(buffer.length()-1);
-                            i++;
-                            buffer.append(lineBuffer.charAt(i));
-                            break;
+                        switch(c) {
+                            case ESCAPE:
+                                buffer.deleteCharAt(buffer.length()-1);
+                                buffer.append(lineBuffer.charAt(++i));
+                                _break = true;
+                                break;
+                            case V_END:
+                                buffer.deleteCharAt(buffer.length()-1);
+                                String currentValue = buffer.toString().trim();
+                                if(currentValue.isBlank())
+                                    throw new IllegalStateException(error("Values are not permitted to be blank.", line, i));
+                                buffer.setLength(0);
+                                groups.peek().addKeyValue(currentKey, currentValue);
+                                state = State.IN_GROUP;
+                                break;
+                            case LITERAL:
+                                String candidate = buffer.toString();
+                                candidate = candidate.substring(0, candidate.length()-1);
+                                if(!candidate.isBlank())
+                                    throw new IllegalStateException(error("Cannot transition to LITERAL with non-literal value already started.", line, i));
+                                buffer.deleteCharAt(buffer.length()-1);
+                                state = State.IN_LITERAL;
+                                break;
+                            default:
                         }
                         
-                        // End value
-                        if(c == V_END) {
+                        break;
+                    case IN_LITERAL:
+                        
+                        if(c != LITERAL)
+                            break;
+
+                        if(i > 0 && lineBuffer.charAt(i-1) == ESCAPE) {
+                            buffer.setCharAt(buffer.length()-2, c);
+                            buffer.setLength(buffer.length()-1);
+                        } else {
                             buffer.deleteCharAt(buffer.length()-1);
                             String currentValue = buffer.toString().trim();
                             if(currentValue.isBlank())
                                 throw new IllegalStateException(error("Values are not permitted to be blank.", line, i));
+                            if(newLineLiteralCounter > 0)
+                                currentValue = currentValue.lines().map(String::trim).collect(Collectors.joining("\n"));
                             buffer.setLength(0);
                             groups.peek().addKeyValue(currentKey, currentValue);
+                            if(i >= lineBuffer.length()-1 || !(lineBuffer.charAt(i+1) == V_END))
+                                throw new IllegalStateException(error("Closing literal must be followed by V_END! (Unescaped literal in value?)", line, i));
+                            i++;
                             state = State.IN_GROUP;
-                            break;
+                            newLineLiteralCounter = -1;
                         }
                         
                         break;
@@ -348,6 +431,9 @@ public final class EzConf {
             throw rethrow(e);
         }
         
+        if(state == State.IN_LITERAL)
+            throw new IllegalStateException("Invalid EZConf! String literal has not been closed. Document end reached in state IN_LITERAL should be UNDEFINED.");
+        
         if(state != State.UNDEFINED)
             throw new IllegalStateException("Invalid EZConf! Document end reached in state '" + state + "' should be UNDEFINED.");
         
@@ -368,7 +454,7 @@ public final class EzConf {
      * @param configuration to dump.
      * @throws IOException if writing fails.
      */
-    public static void dump(Path destination, Configuration configuration) throws IOException {
+    public void dump(Path destination, Configuration configuration) throws IOException {
         Objects.requireNonNull(destination, "destination must not be null");
         Files.write(destination, dumpInternal(configuration, false).getBytes(StandardCharsets.UTF_8));
     }
@@ -379,7 +465,7 @@ public final class EzConf {
      * @param configuration to dump.
      * @throws IOException if writing fails.
      */
-    public static void dumpPretty(Path destination, Configuration configuration) throws IOException {
+    public void dumpPretty(Path destination, Configuration configuration) throws IOException {
         Files.write(destination, dumpInternal(configuration, true).getBytes(StandardCharsets.UTF_8));
     }
     
@@ -388,7 +474,7 @@ public final class EzConf {
      * @param configuration to dump.
      * @return clear text serialized form.
      */
-    public static String dump(Configuration configuration) {
+    public String dump(Configuration configuration) {
         return dumpInternal(configuration, false);
     }
     
@@ -397,11 +483,11 @@ public final class EzConf {
      * @param configuration to dump.
      * @return clear text serialized form.
      */
-    public static String dumpPretty(Configuration configuration) {
+    public String dumpPretty(Configuration configuration) {
         return dumpInternal(configuration, true);
     }
     
-    private static String dumpInternal(Configuration configuration, boolean pretty) {
+    private String dumpInternal(Configuration configuration, boolean pretty) {
         Objects.requireNonNull(configuration, "configuration must not be null");
         StringBuilder sb = new StringBuilder(500);
         if(pretty) {
@@ -412,26 +498,26 @@ public final class EzConf {
         return sb.toString().trim();
     }
     
-    private static final String escaped(String toEscape, StringBuilder escape) {
+    private static final String escaped(Map<Character, String> mapping, String toEscape, StringBuilder escapeBuffer) {
         for(int i = 0; i < toEscape.length(); i++) {
             char c = toEscape.charAt(i);
-            String esc = SHOULD_ESCAPE.get(c);
-            escape.append(esc == null ? c : esc);
+            String esc = mapping.get(c);
+            escapeBuffer.append(esc == null ? c : esc);
         }
-        String s = escape.toString();
-        escape.setLength(0);
+        String s = escapeBuffer.toString();
+        escapeBuffer.setLength(0);
         return s;
     }
     
-    private static void dumpRecursive(List<ConfigurationGroup> groups, int substIdx, StringBuilder sb, StringBuilder escape) {
+    private void dumpRecursive(List<ConfigurationGroup> groups, int substIdx, StringBuilder sb, StringBuilder escape) {
         for(ConfigurationGroup g : groups) {
             sb.append(g.getPath().substring(substIdx));
             sb.append("{");
             for(Map.Entry<String, String> e : g) {
-                sb.append(escaped(e.getKey(), escape))
-                .append(":")
-                .append(escaped(e.getValue(), escape))
-                .append(";");
+                sb.append(escaped(SHOULD_ESCAPE_KEY, e.getKey(), escape))
+                .append(":");
+                handler.escape(sb, escape, e.getValue());
+                sb.append(";");
             }
             List<ConfigurationGroup> children = g.getChildren();
             if(!children.isEmpty()) {
@@ -441,7 +527,7 @@ public final class EzConf {
         }
     }
 
-    private static void dumpRecursivePretty(List<ConfigurationGroup> groups, int substIdx, int indent, StringBuilder sb, StringBuilder escaped) {
+    private void dumpRecursivePretty(List<ConfigurationGroup> groups, int substIdx, int indent, StringBuilder sb, StringBuilder escaped) {
         String indentStr = INDENT.repeat(indent);
         String indentStrInternal = INDENT.repeat(indent+1);
         for(ConfigurationGroup g : groups) {
@@ -450,22 +536,21 @@ public final class EzConf {
             sb.append(" {").append(!g.getKeys().isEmpty() ? "\n" : "");
             for(Map.Entry<String, String> e : g) {
                 String value;
-                String key = escaped(e.getKey(), escaped);
+                String key = escaped(SHOULD_ESCAPE_KEY, e.getKey(), escaped);
                 if(e.getValue().contains("\n")) {
                     // Pretty print multiline
                     String indentMultiline = " ".repeat(indentStrInternal.length() + key.length() + 2);
                     value = e.getValue().replaceAll("\r\n", "\n");
                     value = value.replaceAll("\n", "\n"+indentMultiline);
-                    value = escaped(value, escaped);
                 } else {
                     // Normal print
-                    value = escaped(e.getValue(), escaped);
+                    value = e.getValue();
                 }
                 sb.append(indentStrInternal)
                 .append(key)
-                .append(": ")
-                .append(value)
-                .append(";")
+                .append(": ");
+                handler.escape(sb, escaped, value);
+                sb.append(";")
                 .append("\n");
             }
             List<ConfigurationGroup> children = g.getChildren();
@@ -480,4 +565,9 @@ public final class EzConf {
     private static <T extends Throwable> RuntimeException rethrow(Throwable t) throws T {
         throw (T) t;
     }
+}
+
+@FunctionalInterface
+interface EscapeHandler {
+    void escape(StringBuilder out, StringBuilder buf, String in);
 }

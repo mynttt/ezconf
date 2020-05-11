@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
@@ -21,16 +22,32 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
+import de.mynttt.ezconf.EzConf.ParserFlags;
 import de.mynttt.ezconf.implementation.DefaultConfigurationFactory;
 
 class LibraryTest {
+    
+    private static void assertContains(String sub, String full) {
+        if(sub == null && full == null)
+            return;
+        if(full == null ^ sub == null)
+            fail("AssertContains failed (sub or full null): sub=<"+sub+"> | full=<"+full+">");
+        if(!full.contains(sub))
+            fail("AssertContains failed (sub should be in full): Substring: <"+sub+"> | Full: <"+full+">");
+    }
+    
+    private static void assertThrowsContains(Class<? extends Throwable> ex, Executable x, String contains) {
+        var exc = assertThrows(ex, x);
+        assertContains(contains, exc.getMessage());
+    }
 
     private static Configuration p(String s) {
         return defaultParser().parse(s);
     }
     
-    private static void illg(Executable x) {
-        assertThrows(IllegalStateException.class, x);
+    private static void illg(Executable x, String contains) {
+        var ex = assertThrows(IllegalStateException.class, x);
+        assertContains(contains, ex.getMessage());
     }
     
     @AfterAll static void tearDown() throws IOException {
@@ -43,19 +60,19 @@ class LibraryTest {
     }
     
     @Test void failGroupIllegalCharacter() {
-        illg(() -> p("test_?!-{"));
+        illg(() -> p("test_?!-{"), "BEGIN_GROUP identifer must be DIGIT or NUMBER:");
     }
     
     @Test void failGroupIllegalClose() {
-        illg(() -> p("test}"));
+        illg(() -> p("test}"), "Cannot END_GROUP when in UNDEFINED state.");
     }
     
     @Test void failGroupSameIdentifier() {
-        assertThrows(IllegalArgumentException.class, () -> p("test {} test{}"));
+        assertThrowsContains(IllegalArgumentException.class, () -> p("test {} test{}"), "Path already exists.");
     }
     
     @Test void failGroupMultilineIdentifier() {
-        illg(() -> p("te\nst{}"));
+        illg(() -> p("te\nst{}"), "BEGIN_GROUP cannot be multiline:");
     }
     
     @Test public void parseFlat() {
@@ -77,27 +94,27 @@ class LibraryTest {
     }
     
     @Test public void failOnMultilineKey() {
-       illg(() -> p("test { ke\ny: value; }"));
+       illg(() -> p("test { ke\ny: value; }"), "BEGIN_GROUP or KEY cannot be multiline:");
     }
     
     @Test public void failIncompleteGroup() {
-        illg(() -> p("test {"));
+        illg(() -> p("test {"), "Invalid EZConf! Document end reached in state 'IN_GROUP' should be UNDEFINED.");
     }
     
     @Test public void failIncompleteKeyValue() {
-        illg(() -> p("test { test"));
+        illg(() -> p("test { test"), "BEGIN_GROUP or KEY cannot be multiline");
     }
     
     @Test public void failIncompleteKeyValue2() {
-        illg(() -> p("test { test: test"));
+        illg(() -> p("test { test: test"), " Document end reached in state 'IN_VALUE' should be UNDEFINED.");
     }
     
     @Test public void failIncompleteKeyValue3() {
-        illg(() -> p("test { test: test; "));
+        illg(() -> p("test { test: test; "), "Document end reached in state 'IN_GROUP' should be UNDEFINED.");
     }
     
     @Test public void failOnNestedGroup()  {
-        illg(() -> p("test { tes.t { t: a; }}"));
+        illg(() -> p("test { tes.t { t: a; }}"), "BEGIN_GROUP identifer must be DIGIT or NUMBER:");
     }
     
     @Test public void shouldEscapeValueProberly() {
@@ -109,11 +126,11 @@ class LibraryTest {
     }
     
     @Test public void shouldFailOnEscapedNestedGroupIdentifier() {
-        illg(() -> p("test{ \\#\\{\\}\\:\\;\\\\{ key: value;}}"));
+        illg(() -> p("test{ \\#\\{\\}\\:\\;\\\\{ key: value;}}"), "BEGIN_GROUP identifer must be DIGIT or NUMBER:");
     }
     
     @Test public void shouldFailOnEscapedGroupIdentifier() {
-        illg(() -> p("\\#\\{\\}\\:\\;\\\\{ { key: value;}}"));
+        illg(() -> p("\\#\\{\\}\\:\\;\\\\{ { key: value;}}"), "BEGIN_GROUP identifer must be DIGIT or NUMBER");
     }
     
     @Test public void parseKeyValue() {
@@ -142,28 +159,31 @@ class LibraryTest {
         assertEquals("exists\nis\nmultiline", c.getGroup("level1.level4.level4a").getValue("key4a"));
     }
     
-    @Test public void testPretty() throws IOException, URISyntaxException {
+    @Test public void testPrettyNoLiteral() throws IOException, URISyntaxException {
+        var p = EzConf.defaultParser(ParserFlags.DUMP_ESCAPE_INSTEAD_OF_LITERAL);
         Configuration c = defaultParser().parse(Paths.get(LibraryTest.class.getResource("/Nested.ez").toURI()));
-        assertEquals(Files.readString(Paths.get(LibraryTest.class.getResource("/pretty.txt").toURI()), StandardCharsets.UTF_8), EzConf.dumpPretty(c));
+        assertEquals(Files.readString(Paths.get(LibraryTest.class.getResource("/pretty.txt").toURI()), StandardCharsets.UTF_8), p.dumpPretty(c));
         Configuration c2 = defaultParser().parse(LibraryTest.class.getResourceAsStream("/pretty.txt"));
         assertEquals(c, c2);
         assertEquals(c2, c);
     }
     
-    @Test public void testNormal() throws IOException, URISyntaxException {
+    @Test public void testNormalNoLiteral() throws IOException, URISyntaxException {
+        var p = EzConf.defaultParser(ParserFlags.DUMP_ESCAPE_INSTEAD_OF_LITERAL);
         Configuration c = defaultParser().parse(LibraryTest.class.getResourceAsStream("/Nested.ez"));
-        assertEquals(Files.readString(Paths.get(LibraryTest.class.getResource("/normal.txt").toURI()), StandardCharsets.UTF_8), EzConf.dump(c));
+        assertEquals(Files.readString(Paths.get(LibraryTest.class.getResource("/normal.txt").toURI()), StandardCharsets.UTF_8), p.dump(c));
         Configuration c2 = defaultParser().parse(LibraryTest.class.getResourceAsStream("/normal.txt"));
         assertEquals(c, c2);
         assertEquals(c2, c);
     }
     
-    @Test public void testPathDump() throws IOException {
+    @Test public void testPathDumpNoLiteral() throws IOException {
+        var p = EzConf.defaultParser(ParserFlags.DUMP_ESCAPE_INSTEAD_OF_LITERAL);
         Configuration c = defaultParser().parse(LibraryTest.class.getResourceAsStream("/Nested.ez"));
         String u1 = "_tpd1";
         String u2 = "_tpd2";
-        EzConf.dump(Paths.get(u1), c);
-        EzConf.dumpPretty(Paths.get(u2), c);
+        p.dump(Paths.get(u1), c);
+        p.dumpPretty(Paths.get(u2), c);
         Configuration c2 = defaultParser().parse(Paths.get(u1));
         Configuration c3 = defaultParser().parse(Paths.get(u2));
         assertEquals(c3, c2);
@@ -201,11 +221,11 @@ class LibraryTest {
     }
     
     @Test public void childDuplicateNested() {
-        assertThrows(IllegalArgumentException.class, () -> p("test { a {} b { c{} c{} }}"));
+        assertThrowsContains(IllegalArgumentException.class, () -> p("test { a {} b { c{} c{} }}"), "Path already exists.");
     }
     
     @Test public void failNestedMultilineKey() {
-        illg(() -> p("test { test { t\nn: der; }}"));
+        illg(() -> p("test { test { t\nn: der; }}"), "BEGIN_GROUP or KEY cannot be multiline");
     }
     
     @Test public void spaceStaysInKey() {
@@ -217,7 +237,7 @@ class LibraryTest {
     }
     
     @Test public void failDuplicateNestedGroup() {
-        assertThrows(IllegalArgumentException.class, () -> p("test { a{} b{} a{}}"));
+        assertThrowsContains(IllegalArgumentException.class, () -> p("test { a{} b{} a{}}"), "Path already exists.");
     }
     
     @Test public void parsesChildren() {
@@ -225,19 +245,19 @@ class LibraryTest {
     }
     
     @Test public void failMalformedQuery1() {
-        assertThrows(IllegalArgumentException.class, () -> p("test{}").findValue("#test")); 
+        assertThrowsContains(IllegalArgumentException.class, () -> p("test{}").findValue("#test"), "Queries cannot start with"); 
     }
     
     @Test public void failMalformedQuery2() {
-        assertThrows(IllegalArgumentException.class, () -> p("test{}").findValue("test"));
+        assertThrowsContains(IllegalArgumentException.class, () -> p("test{}").findValue("test"), "Queries must be in this format:");
     }
     
     @Test public void duplicateKey() {
-        assertThrows(IllegalArgumentException.class, () -> p("test{a:k; a:k;}"));
+        assertThrowsContains(IllegalArgumentException.class, () -> p("test{a:k; a:k;}"), "is already present.");
     }
     
     @Test public void failQueryNoGroup() {
-        assertThrows(NoSuchElementException.class, () -> p("test{}").findValue("tes#val"));
+        assertThrowsContains(NoSuchElementException.class, () -> p("test{}").findValue("tes#val"), "does not exist.");
     }
     
     @Test public void successQuery() {
@@ -301,35 +321,42 @@ class LibraryTest {
     }
     
     @Test public void shouldFailNullKey() {
-        assertThrows(NullPointerException.class, () -> newDefaultInstance().addRoot("t").put(null, ""));
+        assertThrowsContains(NullPointerException.class, () -> newDefaultInstance().addRoot("t").put(null, ""), 
+                "Key must be non-null.");
     }
     
     @Test public void shouldFailNullValue() {
-        assertThrows(NullPointerException.class, () -> newDefaultInstance().addRoot("t").put("t", null));
+        assertThrowsContains(NullPointerException.class, () -> newDefaultInstance().addRoot("t").put("t", null), 
+                "must be non-null");
     }
     
     @Test public void shouldFailDuplicateKey() {
-        assertThrows(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("t").put("t", "").put("t", ""));
+        assertThrowsContains(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("t").put("t", "x").put("t", "y"), 
+                "is already present.");
     }
     
     @Test public void shouldFailInvalidGroupName1() {
-        assertThrows(IllegalArgumentException.class, () -> newDefaultInstance().addRoot(""));
+        assertThrowsContains(IllegalArgumentException.class, () -> newDefaultInstance().addRoot(""), 
+                "Group name should not be empty.");
     }
     
     @Test public void shouldFailInvalidGroupName2() {
-        assertThrows(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("te.st_-"));
+        assertThrowsContains(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("te.st_-"), 
+                "Character in group name must be digit or letter.");
     }
     
     @Test public void shouldFailInvalidGroupName3() {
-        assertThrows(IllegalArgumentException.class, () -> newDefaultInstance().addRoot(" tes t "));
+        assertThrowsContains(IllegalArgumentException.class, () -> newDefaultInstance().addRoot(" tes t "), 
+                "Whitespace is not allowed for group name.");
     }
     
     @Test public void shouldFailDuplicateGroupRoot() {
-        assertThrows(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("t").endRoot().addRoot("t"));
+        assertThrowsContains(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("t").endRoot().addRoot("t"),
+                "Path already exists.");
     }
     
     @Test public void shouldFailDuplicateGroupRootNested() {
-        assertThrows(IllegalArgumentException.class, () -> newDefaultInstance()
+        assertThrowsContains(IllegalArgumentException.class, () -> newDefaultInstance()
                 .addRoot("t")
                 .endRoot()
                 .addRoot("d")
@@ -337,39 +364,61 @@ class LibraryTest {
                 .addRoot("tp")
                     .addChild("ttd")
                     .endChild()
-                    .addChild("ttd"));
+                    .addChild("ttd"), "Path already exists.");
     }
     
     @Test public void shouldFailIllegalEndCallRoot() {
-        illg(() -> newDefaultInstance().addRoot("t").addChild("t").endRoot());
+        illg(() -> newDefaultInstance().addRoot("t").addChild("t").endRoot(), "Cannot end root while still in child. Current path");
     }
     
     @Test public void shouldFailIllegalEndCallChild() {
-        illg(() -> newDefaultInstance().addRoot("t").endChild());
+        illg(() -> newDefaultInstance().addRoot("t").endChild(), "Cannot end child while in root.");
     }
     
-    @Test public void dumpShouldHandleEscapedCharacters() {
-        var c1 = defaultParser().parse(EzConf.dump(newDefaultInstance()
+    @Test public void dumpShouldHandleEscapedCharactersNoLiteral() {
+        var p = EzConf.defaultParser(ParserFlags.DUMP_ESCAPE_INSTEAD_OF_LITERAL);
+        var c1 = defaultParser().parse(p.dump(newDefaultInstance()
             .addRoot("test")
-            .put("\\{};.:#", "\\{};.:#")
+            .put("\\{};.\":#", "\\{};.\":#")
             .endRoot()
             .build()));
-        assertEquals("\\{};.:#", c1.getValue("test#\\{};.:#"));
+        assertEquals("\\{};.\":#", c1.getValue("test#\\{};.\":#"));
     }
     
-    @Test public void prettyDumpShouldHandleEscapedCharacters() {
-        var c1 = defaultParser().parse(EzConf.dumpPretty(newDefaultInstance()
+    @Test public void prettyDumpShouldHandleEscapedCharactersNoLiteral() {
+        var p = EzConf.defaultParser(ParserFlags.DUMP_ESCAPE_INSTEAD_OF_LITERAL);
+        var c1 = defaultParser().parse(p.dumpPretty(newDefaultInstance()
                 .addRoot("test")
-                .put("\\{};.:#", "\\{};.:#")
+                .put("\\{};.\":#", "\\{};.\":#")
                 .endRoot()
                 .build()));
-            assertEquals("\\{};.:#", c1.getValue("test#\\{};.:#"));
+            assertEquals("\\{};.\":#", c1.getValue("test#\\{};.\":#"));
+    }
+    
+    @Test public void dumpShouldHandleEscapedCharactersLiteral() {
+        var p = EzConf.defaultParser();
+        var c1 = defaultParser().parse(p.dump(newDefaultInstance()
+            .addRoot("test")
+            .put("\\{};.\":#", "\\{};.\":#")
+            .endRoot()
+            .build()));
+        assertEquals("\\{};.\":#", c1.getValue("test#\\{};.\":#"));
+    }
+    
+    @Test public void prettyDumpShouldHandleEscapedCharactersLiteral() {
+        var p = EzConf.defaultParser();
+        var c1 = defaultParser().parse(p.dumpPretty(newDefaultInstance()
+                .addRoot("test")
+                .put("\\{};.\":#", "\\{};.\":#")
+                .endRoot()
+                .build()));
+            assertEquals("\\{};.\":#", c1.getValue("test#\\{};.\":#"));
     }
     
     @Test public void doubleCloseBuilder() {
         var b = newDefaultInstance();
         b.build();
-        illg(() -> b.build()); 
+        illg(() -> b.build(), "Builder has already been closed with 'build()'."); 
     }
     
     @Test public void validateWithoutErrors() {
@@ -381,7 +430,8 @@ class LibraryTest {
     }
     
     @Test public void failRequireGroups() {
-        assertThrows(IllegalArgumentException.class, () -> ConfigurationValidator.newInstance().requireGroups());
+        assertThrowsContains(IllegalArgumentException.class, () -> ConfigurationValidator.newInstance().requireGroups(), 
+                "groups must contain group identifiers");
     }
     
     @Test public void groupDoesNotExist() {
@@ -423,7 +473,8 @@ class LibraryTest {
     }
     
     @Test public void failRecursRequireGroups() {
-        assertThrows(IllegalArgumentException.class, () -> ConfigurationValidator.newInstance().valuesMatchRecursively(DefaultValidators.IS_BYTE));
+        assertThrowsContains(IllegalArgumentException.class, () -> ConfigurationValidator.newInstance().valuesMatchRecursively(DefaultValidators.IS_BYTE), 
+                "groups must contain group identifiers");
     }
     
     @Test public void valuesMatchInGroup() {
@@ -481,7 +532,8 @@ class LibraryTest {
     }
     
     @Test public void failMatchGroupRequireKeys() {
-        assertThrows(IllegalArgumentException.class, () -> ConfigurationValidator.newInstance().valuesMatchInGroup(DefaultValidators.IS_BYTE, "t", new String[0]));
+        assertThrowsContains(IllegalArgumentException.class, () -> ConfigurationValidator.newInstance().valuesMatchInGroup(DefaultValidators.IS_BYTE, "t", new String[0]), 
+                "keys must contain key identifiers");
     }
     
     @Test public void requireKeys() {
@@ -507,7 +559,8 @@ class LibraryTest {
     }
     
     @Test public void failRequireKeys() {
-        assertThrows(IllegalArgumentException.class, () -> ConfigurationValidator.newInstance().requireKeys("t", new String[0]));
+        assertThrowsContains(IllegalArgumentException.class, () -> ConfigurationValidator.newInstance().requireKeys("t", new String[0]),
+                "keys must contain key identifiers");
     }
     
     @Test public void testValidators() {
@@ -535,34 +588,109 @@ class LibraryTest {
     }
     
     @Test public void shouldFailEmptyGroupName() {
-        illg(() -> defaultParser().parse("   {}"));
+        illg(() -> defaultParser().parse("   {}"), "Group identifier are not permitted to be blank.");
     }
     
     @Test public void shouldFailEmptyKeyName() {
-        illg(() -> defaultParser().parse("t{ : value;}"));
+        illg(() -> defaultParser().parse("t{ : value;}"), "Keys are not permitted to be blank.");
     }
     
     @Test public void shouldFailEmptyValue() {
-        illg(() -> defaultParser().parse("T{ k:    ;}"));
+        illg(() -> defaultParser().parse("T{ k:    ;}"), "Values are not permitted to be blank.");
     }
     
     @Test public void shouldFailEmptyValueMultiline() {
-        illg(() -> defaultParser().parse("T{ k: \n\n  \n;}"));
+        illg(() -> defaultParser().parse("T{ k: \n\n  \n;}"), "Values are not permitted to be blank.");
     }
     
     @Test public void shouldFailEmptyKeyBuilder() {
-        assertThrows(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("t").put("            ", "v"));
+        assertThrowsContains(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("t").put("            ", "v"),
+                "Blank keys are not permitted");
     }
     
     @Test public void shouldFailMultilineKeyBuilder() {
-        assertThrows(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("t").put(" invalid \n key  ", "v"));
+        assertThrowsContains(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("t").put(" invalid \n key  ", "v"),
+                "Key is not permitted to be multiline:");
     }
     
     @Test public void shouldFailEmptyValueBuilder() {
-        assertThrows(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("t").put("     v       ", "        "));
+        assertThrowsContains(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("t").put("     v       ", "        "),
+                "Blank values are not permitted.");
     }
     
     @Test public void shouldFailEmptyValueMultilineBuilder() {
-        assertThrows(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("t").put("     v       ", "    \n\n\n\n    "));
+        assertThrowsContains(IllegalArgumentException.class, () -> newDefaultInstance().addRoot("t").put("     v       ", "    \n\n\n\n    "),
+                "Blank values are not permitted.");
+    }
+    
+    @Test public void stackTest() {
+        Stack<Integer> s = new Stack<>();
+        assertTrue(s.isEmpty());
+        s.push(1);
+        assertEquals(1, s.size());
+        assertEquals(1, s.peek());
+        assertEquals(1, s.size());
+        assertFalse(s.isEmpty());
+        assertEquals(1, s.pop());
+        assertEquals(0, s.size());
+        assertTrue(s.isEmpty());
+        assertThrowsContains(NoSuchElementException.class, () -> s.peek(), "stack is empty");
+        assertThrowsContains(NoSuchElementException.class, () -> s.pop(), "stack is empty");
+        s.push(1);
+        s.push(2);
+        s.push(3);
+        assertThrowsContains(UnsupportedOperationException.class, () -> s.iterator().remove(), "remove");
+        int sum = 0;
+        for(var it = s.iterator(); it.hasNext(); sum += it.next()) {}
+        assertEquals(6, sum);
+    }
+    
+    @Test public void parseLiterals() {
+        var c = defaultParser().parse("literals { literal: \"this is a literal!\\\" []{}#\\:;\"; }");
+        assertEquals("this is a literal!\" []{}#\\:;", c.getValue("literals#literal"));
+    }
+    
+    @Test public void unescapedLiteralFailMustBeClosed() {
+        illg(() -> defaultParser().parse("literals { l: \"literal; }"), "String literal has not been closed. Document end reached in state IN_LITERAL should be UNDEFINED.");
+    }
+    
+    @Test public void unescapedLiteralFailMustBeClosed2() {
+        illg(() -> defaultParser().parse("literals { l: \"  ;}"), "String literal has not been closed. Document end reached in state IN_LITERAL should be UNDEFINED.");
+    }
+    
+    @Test public void unescapedLiteralFailMustBeClosed3() {
+        illg(() -> defaultParser().parse("literals { l: \"test"), "String literal has not been closed. Document end reached in state IN_LITERAL should be UNDEFINED.");
+    }
+    
+    @Test public void unescapedLiteralFailUnescapedLiteral() {
+        illg(() -> defaultParser().parse("l{l:\"literal\" done; }"), "Closing literal must be followed by V_END!");
+    }
+    
+    @Test public void emptyLiteralFail() {
+        illg(() -> defaultParser().parse("l{l: \"\"}"), "Values are not permitted to be blank.");
+    }
+    
+    @Test public void literalEscapeParsed() {
+        var c = defaultParser().parse("l{l: \\\"test; }");
+        assertEquals("\"test", c.getValue("l#l"));
+    }
+    
+    @Test public void unescapedLiteralInStandardValue() {
+        illg(() -> defaultParser().parse("l{l: test\"; }"), "Cannot transition to LITERAL with non-literal value already started.");
+    }
+    
+    @Test public void literalMultlineSuccess() {
+        var c = defaultParser().parse("l{l: \"l\n  is  \n   multi line!\\\"           \n      \n\n\n  \n   \";}");
+        assertEquals("l\nis\nmulti line!\"", c.getValue("l#l"));
+    }
+    
+    @Test public void literalsNoEscape() {
+        var c = defaultParser().parse("L{l: \"{}#;:\\\\\"\";}");
+        assertEquals("{}#;:\\\"", c.getValue("L#l"));
+    }
+    
+    @Test public void keyWhitespaceIsContained() {
+        var c = defaultParser().parse("g { k ey: value; }");
+        assertTrue(c.findValue("g#k ey") != null);
     }
 }

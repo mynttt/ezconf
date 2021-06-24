@@ -9,7 +9,6 @@ A simple hierarchical scoped group based key:value storage/configuration format.
 [![javadoc](https://javadoc.io/badge2/de.mynttt/ezconf/javadoc.svg)](https://javadoc.io/doc/de.mynttt/ezconf) 
 [![GitHub license](https://img.shields.io/github/license/mynttt/ezconf)](https://github.com/mynttt/ezconf/blob/master/LICENSE)
 [![Maven Central](https://maven-badges.herokuapp.com/maven-central/de.mynttt/ezconf/badge.svg)](https://maven-badges.herokuapp.com/maven-central/de.mynttt/ezconf)
-[![Download](https://api.bintray.com/packages/mynttt/oss/de.mynttt.ezconf/images/download.svg) ](https://bintray.com/mynttt/oss/de.mynttt.ezconf/_latestVersion)
 
 ## Syntax
 
